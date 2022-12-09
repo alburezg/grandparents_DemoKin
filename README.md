@@ -4,9 +4,9 @@ Dec 04 2022
 
   - [1. Installation](#1-installation)
   - [2. Get data](#2-get-data)
-  - [3. Number of grandparentes in a
-    population](#3-number-of-grandparentes-in-a-population)
-  - [Plots](#plots)
+  - [3. Approximate the number of grandparentes in a
+    population](#3-approximate-the-number-of-grandparentes-in-a-population)
+  - [Compare to simulations](#compare-to-simulations)
   - [References](#references)
 
 We will use matrix kinship models in a time-variant framework (Caswell
@@ -14,6 +14,12 @@ and Song 2021) to compute the expected number of grandparents and
 grandchildren in a range of countries and the related kin dependencies.
 
 The code runs in R, preferably in RStudio.
+
+The intuition here is that we can approximate the number of grandparents
+in a population in year `y` from a number of known quantities: a) the
+age distribution of grandparents of Focal, b) the age distribution of
+grandchildren for people alive in year `y`, and c) population size by
+age in year `y`.
 
 <img src="DemoKin-Logo.png" align="right" width="200" />
 
@@ -295,44 +301,91 @@ period_kin_l <- lapply(split(data, list(data$Location)), function(X){
     ## Assuming stable population before 1950.
 
 ``` r
-# period_kin_summary <- 
-#   lapply(period_kin_l, `[[`, 'kin_summary') %>% 
-#   bind_rows()
-
 period_kin_full <- 
   lapply(period_kin_l, `[[`, 'kin_full') %>% 
   bind_rows()
 ```
 
-# 3\. Number of grandparentes in a population
+# 3\. Approximate the number of grandparentes in a population
 
-The intuition here is that if Focal has 2 maternal grandmothers (since
-we are operating in a female matrilineal population). So, if we use GKP
-factors, we can approximate the number of grandparents as `g(x) =
-gm(x)*4`. (Caswell 2022). In a given population, around 4 people will
-share a grandparent. So, an approximation of the number of grandparents
-would be a factor of the population `p(x)` by `g(x)/4`.
+Once we have all the data points that we need, we proceed to implement
+the estimation. Let
+![A(x)](https://latex.codecogs.com/png.latex?A%28x%29 "A(x)") be the sum
+of all individuals who are ‘unique’ grandparents to people aged
+![x](https://latex.codecogs.com/png.latex?x "x"):
 
-## Number of granchildren is given by age distribution of grandparents of Focal
+  
+![&#10;A(x) = p(x) \\times \\sum\_{i=0}^{100}\\left\[a(x,i) \\times
+\\frac{n(i,x)}{\\sum n(i, :)}
+\\right\]&#10;](https://latex.codecogs.com/png.latex?%0AA%28x%29%20%3D%20p%28x%29%20%5Ctimes%20%5Csum_%7Bi%3D0%7D%5E%7B100%7D%5Cleft%5Ba%28x%2Ci%29%20%5Ctimes%20%5Cfrac%7Bn%28i%2Cx%29%7D%7B%5Csum%20n%28i%2C%20%3A%29%7D%20%5Cright%5D%0A
+"
+A(x) = p(x) \\times \\sum_{i=0}^{100}\\left[a(x,i) \\times \\frac{n(i,x)}{\\sum n(i, :)} \\right]
+")  
+<!-- A(x) = p(x) \times \sum_{i=0}^{100}a(x,i) \times \underbrace{\frac{n(i,x)}{\sum n(i, :)}}_{\substack{\text{share of grandkids}\\ \text{aged i}}}   -->
+
+where
+
+  - ![p(x)](https://latex.codecogs.com/png.latex?p%28x%29 "p(x)") is the
+    number of individuals aged
+    ![x](https://latex.codecogs.com/png.latex?x "x") inthe population
+  - ![a(x,i)](https://latex.codecogs.com/png.latex?a%28x%2Ci%29
+    "a(x,i)") is the average number of grandparents aged
+    ![i](https://latex.codecogs.com/png.latex?i "i") for a Focal aged
+    ![x](https://latex.codecogs.com/png.latex?x "x")
+  - ![n(i,x)](https://latex.codecogs.com/png.latex?n%28i%2Cx%29
+    "n(i,x)") is the average number of grandchildren aged
+    ![x](https://latex.codecogs.com/png.latex?x "x") for a Focal aged
+    ![i](https://latex.codecogs.com/png.latex?i "i")
+  - ![n(i,:)](https://latex.codecogs.com/png.latex?n%28i%2C%3A%29
+    "n(i,:)") is the age distribution of grandchildren for a Focal aged
+    ![i](https://latex.codecogs.com/png.latex?i "i")
+
+The total number of grandparents in the population is
+![\\sum\_{x=0}^{100}A(x)](https://latex.codecogs.com/png.latex?%5Csum_%7Bx%3D0%7D%5E%7B100%7DA%28x%29
+"\\sum_{x=0}^{100}A(x)").
+
+Let’s consider a simplified example:
+
+1.  Focal is 10yo
+2.  Focal has 0.4 grandmothers aged 85 and 0.1 grandmothers aged 90
+3.  20% of an 85yo Focal is 10yo and 10% of an 90yo Focal is 10yo  
+4.  In the ‘real’ population, there are 1,000 women aged 10
+5.  The ‘real’ number of grandmothers of 10yo Focals in the population
+    is approximately: 1000 \* (0.4 \* 0.2 + 0.1 \* 0.1) = 90
+    grandmothers
+
+We start by considering the age distribution of grandparents for Focal.
+Since DemoKin currently assumes a matrilinear female population, we
+multiply the numbers by 4 to obtain values foe all grandparents (i.e.,
+we use ‘GKP factors’):
 
 ``` r
-#  From Ivan 20220212
-# 
-# Permiteme generalizar un poco a ver si nos acercamos m?s a los valores:
-#  - Focal tiene 10 a?os
-#  - Tiene 0.4 abuelas de 85 a?os y 0.1 abuelas de 90 a?os.
-#  - Un Focal de 85 a?os tiene el 20% de sus nietas con 10 a?os.
-#  - Un Focal de 90 a?os tiene el 10% de sus nietas con 10 a?os.
-#  - Las mujeres de edad 10 son 1.000 en la poblaci?n real.
-#  - La cantidad de abuelas (l?nea materna) que corresponden a personas de 10 a?os es: 1000 * (0.4 * 20% + 0.1 * 10%) =  90.
-
 gp <- 
   period_kin_full %>% 
   filter(kin == "gm") %>% 
   select(Location, year, age_focal, age_gp = age_kin, gm = living) %>% 
-  # these are just maternal grandmothers. multiply by 4
-  mutate(gp = gm)
+  # these are just maternal grandmothers. multiply by 4?
+  mutate(gp = gm*4) %>% 
+  select(-gm)
 
+# Let's see the age distribution of grandparents for a 15 yo Focal
+
+gp %>% 
+  filter(Location == "China", year == 2000, age_focal %in% c(0, 15, 30)) %>% 
+  mutate(age_focal = as.character(age_focal)) %>% 
+  ggplot(aes(x = age_gp, y = gp, colour = age_focal)) +
+  geom_line() +
+  theme_bw()
+```
+
+![](README_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+
+Next, we get the distribution of grandchildren for Focals in the same
+population and year(s). In addition to this, we also compute the share
+of grandchildren aged x for a Focal aged z (so that it sums to 1 across
+all age\_gd values):
+
+``` r
 gd <- 
   period_kin_full %>% 
   filter(kin == "gd") %>% 
@@ -347,12 +400,19 @@ gd <-
 # What % of a grandparent's aged 90 are 60yo?
 
 gd %>% 
-  filter(Location == "China", year == 2000, age_focal == 90) %>% 
-  pull(share_gd) %>% 
-  plot
+  filter(Location == "China", year == 2000, age_focal %in% c(60, 75, 90)) %>% 
+  pivot_longer(gd:share_gd) %>% 
+  mutate(age_focal = as.character(age_focal)) %>% 
+  ggplot(aes(x = age_gd, y = value, colour = age_focal)) +
+  geom_line() +
+  facet_grid(.~ name) +
+  theme_bw()
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+
+Implement the algorithm by left joining rather than looping for
+efficiency:
 
 ``` r
 gpd <- 
@@ -366,12 +426,16 @@ gpd <-
 # What % of a 20yo Focal's grandparents are x y old?
 
 gpd %>% 
-  filter(iso3 == "CHN", year == 2000, age_focal == 20) %>% 
-  pull(share_gd) %>% 
-  plot
+  filter(iso3 == "CHN", year == 2000, age_focal %in% c(0, 15, 60)) %>% 
+  mutate(age_focal = as.character(age_focal)) %>%
+  pivot_longer(gp:share_gd) %>% 
+  ggplot(aes(x = age_gp, y = value, colour = age_focal)) +
+  geom_line() +
+  facet_grid(.~name) +
+  theme_bw()
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-6-2.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
 
 ``` r
 # Get total number of grandparentes
@@ -395,15 +459,11 @@ gp_num_age <-
 
 ``` r
 # 
-gp_num_age %>% 
-  filter(iso3 == "CHN", year == 2000) %>% 
-  pull(gp_num) %>% 
-  plot()
-```
+# gp_num_age %>% 
+#   filter(iso3 == "CHN", year == 2000) %>% 
+#   pull(gp_num) %>% 
+#   plot()
 
-![](README_files/figure-gfm/unnamed-chunk-6-3.png)<!-- -->
-
-``` r
 gp_num <- 
   gp_num_age %>% 
   group_by(iso3, year) %>% 
@@ -415,35 +475,86 @@ gp_num <-
     ## argument.
 
 ``` r
-# Plot
+# Results
 
 gp_num %>% 
-  mutate(gp_tot = gp_tot/1e6 * 4)
+  mutate(gp_tot = gp_tot/1e6 * 4) %>% 
+  kable()
 ```
 
-    ## # A tibble: 6 x 3
-    ##   iso3   year gp_tot
-    ##   <chr> <int>  <dbl>
-    ## 1 CHN    2000  95.9 
-    ## 2 CHN    2020 101.  
-    ## 3 DEU    2000   4.76
-    ## 4 DEU    2020   4.56
-    ## 5 GTM    2000   1.25
-    ## 6 GTM    2020   1.61
+| iso3 | year |    gp\_tot |
+| :--- | ---: | ---------: |
+| CHN  | 2000 | 383.536428 |
+| CHN  | 2020 | 404.950568 |
+| DEU  | 2000 |  19.046675 |
+| DEU  | 2020 |  18.250674 |
+| GTM  | 2000 |   5.006927 |
+| GTM  | 2020 |   6.424005 |
 
-# Plots
+# Compare to simulations
+
+``` r
+sim <- read.csv("Data/grandparents_by_country_age.csv", stringsAsFactors = F)
+
+iso3_countries <- countrycode(countries, origin = "country.name", destination = "iso3c")
+
+comp <- 
+  gp_num_age %>% 
+  select(iso3, year, age = age_focal, model = gp_num) %>% 
+  left_join(
+      sim %>% select(iso3, year, age, sim = number_grandparents)
+      , by = c("iso3", "year", "age")
+  ) %>% 
+  pivot_longer(model:sim)
+
+
+comp %>% 
+  ggplot(aes(x = age, y = value, colour = name)) +
+  geom_line() +
+  facet_wrap(year~iso3, scale = "free") +
+  theme_bw()
+```
+
+    ## Warning: Removed 2 row(s) containing missing values (geom_path).
+
+![](README_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
+
+The two estimates don’t match but that would be fine since they are not
+the same. DemoKin produces the number of unique grandparents by
+granchild’s age, which is why the values for the red line are higher at
+younger ages. The simulation gives the actual distribution of
+grandparents over grandparental age. So, the x axis in both plts is
+different (for the model, x is the age of the child and for the
+simulation, x is grandparental age).
+
+Even if we sum it up over all ages, the estimates we get are not very
+close, with DemoKin giving much lower numbers:
+
+``` r
+comp %>% 
+  group_by(iso3, year, name) %>% 
+  summarise(value = sum(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_wider() %>% 
+  mutate(diff = model-sim) %>% 
+  kable()
+```
+
+    ## `summarise()` has grouped output by 'iso3', 'year'. You can override using the
+    ## `.groups` argument.
+
+| iso3 | year |     model |       sim |        diff |
+| :--- | ---: | --------: | --------: | ----------: |
+| CHN  | 2000 |  95884107 | 223053295 | \-127169188 |
+| CHN  | 2020 | 101237642 | 333311632 | \-232073990 |
+| DEU  | 2000 |   4761669 |  17710786 |  \-12949117 |
+| DEU  | 2020 |   4562668 |  18473634 |  \-13910966 |
+| GTM  | 2000 |   1251732 |   1628973 |    \-377241 |
+| GTM  | 2020 |   1606001 |   2739971 |   \-1133970 |
 
 # References
 
 <div id="refs" class="references">
-
-<div id="ref-caswell_formal_2022">
-
-Caswell, Hal. 2022. “The Formal Demography of Kinship IV: Two-Sex Models
-and Their Approximations.” *Demographic Research* 47 (September):
-359–96. <https://doi.org/10.4054/DemRes.2022.47.13>.
-
-</div>
 
 <div id="ref-caswell_formal_2021">
 
